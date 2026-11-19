@@ -1,0 +1,15 @@
+#!/bin/sh
+# graft launcher: keeps the package importable from any working directory,
+# and still works when symlinked into a bin dir on PATH.
+set -eu
+self=$0
+# resolve symlinks without requiring GNU readlink
+while [ -L "$self" ]; do
+  target=$(readlink "$self")
+  case $target in
+    /*) self=$target ;;
+    *) self=$(dirname -- "$self")/$target ;;
+  esac
+done
+ROOT=$(CDPATH= cd -- "$(dirname -- "$self")/.." && pwd)
+PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m graftlib "$@"
