@@ -50,7 +50,7 @@ graft sync                              # rewrite profiles after editing config
 graft proxy start|stop|health
 ```
 
-The Grok proxy starts on demand and listens on `127.0.0.1:8787`. It re-reads `~/.grok/auth.json` on each request and never writes that file.
+A Grok session starts the proxy on `127.0.0.1:8787` and stops it when Codex exits. DeepSeek does not start one. `graft proxy start` keeps a proxy running until `graft proxy stop`. The proxy re-reads `~/.grok/auth.json` on each request and never writes that file.
 
 ## Why Grok needs a proxy
 

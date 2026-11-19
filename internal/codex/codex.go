@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"syscall"
 
@@ -109,15 +110,26 @@ func envFor(p *config.Provider) (string, error) {
 	}
 }
 
-// Launch replaces this process with codex. It does not return on success.
+// ExitError is the status Codex returned. Callers should use it as the process exit code.
+type ExitError struct{ Code int }
+
+func (e *ExitError) Error() string { return fmt.Sprintf("codex exited %d", e.Code) }
+
+// Launch runs codex in the foreground. A thin provider's proxy is started for
+// this session only, and stopped when codex exits. An already running proxy is left alone.
 func Launch(cfg *config.Config, p *config.Provider, model string, args []string) error {
 	bin, err := exec.LookPath("codex")
 	if err != nil {
 		return fmt.Errorf("codex not found on PATH")
 	}
+	var started bool
 	if p.IsThin() {
-		if err := proxy.Ensure(cfg, p); err != nil {
+		started, err = proxy.Ensure(cfg, p)
+		if err != nil {
 			return err
+		}
+		if started {
+			defer proxy.Stop(p)
 		}
 		for _, note := range creds.Check(p) {
 			fmt.Fprintf(os.Stderr, "graft: %s\n", note)
@@ -127,12 +139,24 @@ func Launch(cfg *config.Config, p *config.Provider, model string, args []string)
 	if err != nil {
 		return err
 	}
-	argv := []string{bin, "--profile", p.ProfileName(cfg.ProfilePrefix)}
+	argv := []string{"--profile", p.ProfileName(cfg.ProfilePrefix)}
 	if model != "" {
 		argv = append(argv, "-m", model)
 	}
 	argv = append(argv, args...)
-	env := os.Environ()
-	env = append(env, "CODEX_HOME="+cfg.CodexHome, p.EnvVar()+"="+token)
-	return syscall.Exec(bin, argv, env)
+	cmd := exec.Command(bin, argv...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), "CODEX_HOME="+cfg.CodexHome, p.EnvVar()+"="+token)
+	// Keep SIGINT from killing graft before the proxy is stopped. The terminal
+	// still delivers it to codex, which shares this process group.
+	signal.Notify(make(chan os.Signal, 1), syscall.SIGINT, syscall.SIGTERM)
+	if err := cmd.Run(); err != nil {
+		if exit, ok := err.(*exec.ExitError); ok {
+			return &ExitError{Code: exit.ExitCode()}
+		}
+		return err
+	}
+	return nil
 }

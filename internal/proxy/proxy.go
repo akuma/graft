@@ -267,21 +267,22 @@ func Healthy(p *config.Provider) bool {
 }
 
 // Ensure starts the proxy in the background when it is not already healthy.
-func Ensure(cfg *config.Config, p *config.Provider) error {
+// started is false when this provider does not use a proxy, or one was already running.
+func Ensure(cfg *config.Config, p *config.Provider) (started bool, err error) {
 	if !p.IsThin() || Healthy(p) {
-		return nil
+		return false, nil
 	}
-	if err := os.MkdirAll(runDir(), 0o755); err != nil {
-		return err
+	if err = os.MkdirAll(runDir(), 0o755); err != nil {
+		return false, err
 	}
 	bin, err := os.Executable()
 	if err != nil {
-		return err
+		return false, err
 	}
 	logPath := filepath.Join(runDir(), p.Name+".log")
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		return err
+		return false, err
 	}
 	cmd := exec.Command(bin, "proxy", "run", "--provider", p.Name)
 	cmd.Env = append(os.Environ(), "GRAFT_CONFIG="+cfg.Path)
@@ -290,22 +291,22 @@ func Ensure(cfg *config.Config, p *config.Provider) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		f.Close()
-		return err
+		return false, err
 	}
 	f.Close()
 	pidPath := filepath.Join(runDir(), p.Name+".pid")
 	if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", cmd.Process.Pid)), 0o644); err != nil {
-		return err
+		return false, err
 	}
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		if Healthy(p) {
 			log.Printf("graft thin proxy for %s started on port %d (pid %d)", p.Name, p.Port, cmd.Process.Pid)
-			return nil
+			return true, nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("graft proxy for %q failed to start; see %s", p.Name, logPath)
+	return false, fmt.Errorf("graft proxy for %q failed to start; see %s", p.Name, logPath)
 }
 
 // Stop signals the recorded pid. Missing pid files are not an error.

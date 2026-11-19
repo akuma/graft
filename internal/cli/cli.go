@@ -97,6 +97,9 @@ done:
 		return 2
 	}
 	if err := codex.Launch(cfg, p, slug, args); err != nil {
+		if exit, ok := err.(*codex.ExitError); ok {
+			return exit.Code
+		}
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -211,7 +214,7 @@ func cmdProxy(cfg *config.Config, args []string) int {
 		}
 		switch action {
 		case "start":
-			if err := proxy.Ensure(cfg, p); err != nil {
+			if _, err := proxy.Ensure(cfg, p); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return 1
 			}
