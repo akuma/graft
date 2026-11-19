@@ -9,6 +9,8 @@ Run [Codex](https://github.com/openai/codex) against other models without touchi
 
 Plain `codex` still shows the built-in GPT list. A graft session only lists that provider's models.
 
+Codex allows a pasted image or `view_image` only when the catalog lists `image` in `input_modalities`. `grok-4.7`, `grok-4.6`, and `deepseek-flash` do. `deepseek-v4-pro` stays text-only. Graft does not rewrite image parts; both vision upstreams accept the Responses `input_image` Codex already sends. `supports_image_detail_original` stays false, so Codex sends its resized JPEG or PNG.
+
 ## Requirements
 
 - Codex CLI

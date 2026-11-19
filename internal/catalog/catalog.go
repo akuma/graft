@@ -35,6 +35,7 @@ var baseEntry = map[string]any{
 	"comp_hash":                         "3000",
 	"effective_context_window_percent":  95,
 	"input_modalities":                  []any{"text"},
+	"supports_image_detail_original":    false,
 	"supports_experimental_context":     false,
 	"prefer_websockets":                 false,
 	"availability_nux":                  nil,
@@ -152,7 +153,20 @@ func Entry(p *config.Provider, slug string) map[string]any {
 		entry["context_window"] = p.ContextWindow
 		entry["max_context_window"] = p.ContextWindow
 	}
+	// Codex gates pasted images and view_image on this field. Both Grok models
+	// and deepseek-flash accept Responses input_image. deepseek-v4-pro does not,
+	// and advertising image there makes Codex send a part the API rejects.
+	// detail "original" is left off: Codex would keep full-resolution bytes, and
+	// Grok's documented detail value is "high". The resized JPEG/PNG path is the
+	// one both upstreams document.
+	if acceptsImages(p.Name, slug) {
+		entry["input_modalities"] = []any{"text", "image"}
+	}
 	return entry
+}
+
+func acceptsImages(provider, slug string) bool {
+	return provider == "grok" || slug == "deepseek-flash"
 }
 
 // Write writes the catalog if it changed. Providers with no models are skipped.

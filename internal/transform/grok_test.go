@@ -37,6 +37,23 @@ func TestWebSearchFieldsAreStripped(t *testing.T) {
 	}
 }
 
+func TestInputImageIsLeftAlone(t *testing.T) {
+	body := base()
+	image := map[string]any{
+		"type": "message", "role": "user",
+		"content": []any{map[string]any{"type": "input_image", "image_url": "data:image/png;base64,aaaa", "detail": "high"}},
+	}
+	body["input"] = []any{image}
+	got := ForGrok(body)
+	content := got.Body["input"].([]any)[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if content["type"] != "input_image" || content["image_url"] != "data:image/png;base64,aaaa" || content["detail"] != "high" {
+		t.Fatalf("image part = %#v", content)
+	}
+	if len(got.Notes) != 0 {
+		t.Fatalf("notes = %v", got.Notes)
+	}
+}
+
 func TestWebSearchWithoutExtrasIsUntouched(t *testing.T) {
 	body := base()
 	body["tools"] = []any{map[string]any{"type": "web_search"}}
