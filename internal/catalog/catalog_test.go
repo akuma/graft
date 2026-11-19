@@ -27,8 +27,11 @@ func TestGrokCatalogContainsOnlyItsModels(t *testing.T) {
 		t.Fatalf("grok efforts = %v", efforts)
 	}
 	deepseek := Entry(&config.Provider{Name: "deepseek", Label: "DeepSeek"}, "deepseek-v4-pro")
-	if strings.Join(effortNames(deepseek["supported_reasoning_levels"].([]any)), ",") != "low,medium,high" {
-		t.Fatal("xhigh leaked onto deepseek")
+	if strings.Join(effortNames(deepseek["supported_reasoning_levels"].([]any)), ",") != "low,high,max" {
+		t.Fatalf("deepseek efforts = %v", effortNames(deepseek["supported_reasoning_levels"].([]any)))
+	}
+	if deepseek["default_reasoning_level"] != "high" {
+		t.Fatalf("deepseek default = %v", deepseek["default_reasoning_level"])
 	}
 }
 

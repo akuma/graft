@@ -75,6 +75,14 @@ var reasoningLevels = []any{
 	map[string]any{"effort": "high", "description": "Greater reasoning depth for complex problems"},
 }
 
+// DeepSeek's Responses API has three real depths. medium and xhigh are
+// accepted but mapped to high, so the picker must not offer them.
+var deepseekReasoningLevels = []any{
+	map[string]any{"effort": "low", "description": "Fast responses with lighter reasoning"},
+	map[string]any{"effort": "high", "description": "Greater reasoning depth for everyday work"},
+	map[string]any{"effort": "max", "description": "Maximum reasoning depth for complex problems"},
+}
+
 // grok-4.6 and later accept a fourth effort. xAI treats unknown xhigh as high
 // on older models; both models in the grok provider support it.
 var grokReasoningLevels = append(append([]any{}, reasoningLevels...),
@@ -127,9 +135,12 @@ func Entry(p *config.Provider, slug string) map[string]any {
 	entry["display_name"] = name
 	entry["description"] = p.Label + " via graft"
 	entry["default_reasoning_level"] = "high"
-	if p.Name == "grok" {
+	switch p.Name {
+	case "grok":
 		entry["supported_reasoning_levels"] = grokReasoningLevels
-	} else {
+	case "deepseek":
+		entry["supported_reasoning_levels"] = deepseekReasoningLevels
+	default:
 		entry["supported_reasoning_levels"] = reasoningLevels
 	}
 	text := instructions
