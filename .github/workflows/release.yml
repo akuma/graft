@@ -25,7 +25,7 @@ jobs:
           mkdir -p dist
           for os in darwin linux; do
             for arch in amd64 arm64; do
-              CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w" -o dist/graft ./cmd/graft
+              CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w -X github.com/akuma/graft/internal/version.Version=${GITHUB_REF_NAME}" -o dist/graft ./cmd/graft
               tar -C dist -czf "dist/graft_${ver}_${os}_${arch}.tar.gz" graft
               rm dist/graft
             done

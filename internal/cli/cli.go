@@ -11,12 +11,17 @@ import (
 	"github.com/akuma/graft/internal/config"
 	"github.com/akuma/graft/internal/creds"
 	"github.com/akuma/graft/internal/proxy"
+	"github.com/akuma/graft/internal/version"
 )
 
 // Main runs graft and returns a process exit code.
 func Main(argv []string) int {
 	if len(argv) > 0 && argv[0] == "codex" {
 		return cmdCodex(argv[1:])
+	}
+	if len(argv) == 1 && isVersion(argv[0]) {
+		fmt.Println(version.String())
+		return 0
 	}
 	if len(argv) == 0 || argv[0] == "-h" || argv[0] == "--help" {
 		usage(os.Stdout)
@@ -106,7 +111,12 @@ done:
 	return 0
 }
 
+func isVersion(arg string) bool {
+	return arg == "version" || arg == "--version" || arg == "-v" || arg == "-V"
+}
+
 func cmdStatus(cfg *config.Config) int {
+	fmt.Println("version " + version.String())
 	fmt.Println("config  " + cfg.Path)
 	fmt.Println("codex   " + cfg.CodexHome)
 	fmt.Println()
@@ -341,11 +351,12 @@ func finish(err error) int {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprint(w, `graft runs Codex against a non-OpenAI provider.
-
+	fmt.Fprintf(w, "graft %s runs Codex against a non-OpenAI provider.\n", version.String())
+	fmt.Fprint(w, `
 Usage:
   graft codex -m grok-4.7 [codex args...]
   graft codex -m deepseek-flash [codex args...]
+  graft version
   graft init
   graft sync [-q]
   graft models

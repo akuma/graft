@@ -45,6 +45,7 @@ graft codex -m deepseek-v4-pro exec "fix the bug"
 
 ```sh
 export DEEPSEEK_API_KEY=sk-...          # or: graft key set deepseek
+graft version
 graft status
 graft doctor
 graft models
