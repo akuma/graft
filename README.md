@@ -90,3 +90,7 @@ Confirm the upstream actually implements `/responses` before adding it. A Chat C
 ```sh
 go test ./...
 ```
+
+## License
+
+[MIT](LICENSE)
