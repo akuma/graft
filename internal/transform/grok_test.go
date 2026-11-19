@@ -46,20 +46,49 @@ func TestWebSearchWithoutExtrasIsUntouched(t *testing.T) {
 	}
 }
 
-func TestReasoningItemsAreDropped(t *testing.T) {
+func TestNullReasoningContentIsDropped(t *testing.T) {
 	body := base()
+	reasoning := map[string]any{
+		"type":              "reasoning",
+		"id":                "rs_1",
+		"summary":           []any{map[string]any{"type": "summary_text", "text": "plan"}},
+		"content":           nil,
+		"encrypted_content": "blob",
+	}
+	plain := map[string]any{"type": "reasoning", "summary": []any{}, "encrypted_content": "kept"}
+	filled := map[string]any{"type": "reasoning", "content": []any{map[string]any{"type": "reasoning_text", "text": "full"}}}
 	body["input"] = []any{
-		map[string]any{"type": "message"},
-		map[string]any{"type": "reasoning", "encrypted_content": "blob"},
+		map[string]any{"type": "message", "content": nil},
+		reasoning,
+		plain,
+		filled,
 		map[string]any{"type": "function_call"},
-		map[string]any{"type": "function_call_output"},
 	}
 	got := ForGrok(body)
 	items := got.Body["input"].([]any)
-	if len(items) != 3 {
+	if len(items) != 5 {
 		t.Fatalf("input len = %d", len(items))
 	}
-	if !hasNote(got.Notes, "r3:drop-reasoning-items:1") {
+	gotReasoning := items[1].(map[string]any)
+	if _, ok := gotReasoning["content"]; ok {
+		t.Fatalf("null content kept: %#v", gotReasoning)
+	}
+	if gotReasoning["encrypted_content"] != "blob" || gotReasoning["id"] != "rs_1" {
+		t.Fatalf("reasoning = %#v", gotReasoning)
+	}
+	if _, ok := plain["content"]; ok || items[2].(map[string]any)["encrypted_content"] != "kept" {
+		t.Fatalf("plain reasoning changed: %#v", items[2])
+	}
+	if items[3].(map[string]any)["content"] == nil {
+		t.Fatal("non-null reasoning content was dropped")
+	}
+	if _, ok := items[0].(map[string]any)["content"]; !ok {
+		t.Fatal("null content on a message was dropped")
+	}
+	if _, ok := reasoning["content"]; !ok {
+		t.Fatal("input reasoning item was mutated")
+	}
+	if !hasNote(got.Notes, "r3:drop-null-reasoning-content:1") {
 		t.Fatalf("notes = %v", got.Notes)
 	}
 }

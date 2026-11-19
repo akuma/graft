@@ -54,11 +54,11 @@ A Grok session starts the proxy on `127.0.0.1:8787` and stops it when Codex exit
 
 ## Why Grok needs a proxy
 
-Codex speaks the Responses API. DeepSeek accepts that directly. Grok's subscription proxy does not accept three things Codex always sends, so graft strips them and nothing else:
+Codex speaks the Responses API. DeepSeek accepts that directly. Grok's subscription proxy rejects a few shapes Codex sends, so graft rewrites those and nothing else:
 
 - `tools[].type = "namespace"` (multi-agent and MCP bundles) → 422
 - extra fields on `web_search`, such as `external_web_access` → 400
-- replayed `reasoning` items → 400 (`Could not decode the compaction blob`)
+- `"content": null` on a replayed `reasoning` item → 400 (`Could not decode the compaction blob`). The item, its summary, and `encrypted_content` stay
 - `tool_choice` when `tools` is missing or empty (local compaction sends `tools: []` with `tool_choice: "auto"`) → 400
 
 Rules live in `internal/transform`.

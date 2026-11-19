@@ -5,7 +5,7 @@
 //
 //	R1 namespace tools   -> 422 unknown variant `namespace`
 //	R2 web_search extras -> 400 Argument not supported: external_web_access
-//	R3 echoed reasoning  -> 400 Could not decode the compaction blob
+//	R3 null reasoning content -> 400 Could not decode the compaction blob
 //	R4 orphan tool_choice -> 400 tool_choice set but no tools were specified
 package transform
 
@@ -26,8 +26,8 @@ type Result struct {
 }
 
 // ForGrok applies R1..R4. The input map is not modified.
-// include: ["reasoning.encrypted_content"] is left in place; only echoed
-// reasoning items are rejected.
+// include: ["reasoning.encrypted_content"] is left in place. A replayed
+// reasoning item stays; only its null content channel is removed.
 func ForGrok(body map[string]any) Result {
 	out := clone(body)
 	var notes []string
@@ -42,7 +42,7 @@ func ForGrok(body map[string]any) Result {
 		out["tools"] = dropUnsupported(tools, &notes)
 	}
 	if items, ok := out["input"].([]any); ok {
-		out["input"] = dropReasoning(items, &notes)
+		out["input"] = stripNullReasoningContent(items, &notes)
 	}
 	// Codex local compaction sends tools: [] with tool_choice: "auto".
 	// The same 400 happens when every tool was a dropped namespace.
@@ -86,21 +86,36 @@ func stripWebSearch(tool map[string]any, notes *[]string) map[string]any {
 	return map[string]any{"type": "web_search"}
 }
 
-func dropReasoning(items []any, notes *[]string) []any {
-	kept := make([]any, 0, len(items))
-	dropped := 0
-	for _, raw := range items {
+// stripNullReasoningContent deletes "content": null on reasoning items.
+// Codex writes that null for an absent channel. xAI rejects it and names the
+// sibling encrypted_content. The item, its summary, and the blob stay.
+func stripNullReasoningContent(items []any, notes *[]string) []any {
+	out := make([]any, len(items))
+	stripped := 0
+	for i, raw := range items {
 		item, ok := raw.(map[string]any)
-		if ok && str(item["type"]) == "reasoning" {
-			dropped++
+		if !ok || str(item["type"]) != "reasoning" {
+			out[i] = raw
 			continue
 		}
-		kept = append(kept, raw)
+		content, has := item["content"]
+		if !has || content != nil {
+			out[i] = raw
+			continue
+		}
+		copied := make(map[string]any, len(item))
+		for k, v := range item {
+			if k != "content" {
+				copied[k] = v
+			}
+		}
+		out[i] = copied
+		stripped++
 	}
-	if dropped > 0 {
-		*notes = append(*notes, "r3:drop-reasoning-items:"+itoa(dropped))
+	if stripped > 0 {
+		*notes = append(*notes, "r3:drop-null-reasoning-content:"+itoa(stripped))
 	}
-	return kept
+	return out
 }
 
 func dropUnsupported(tools []any, notes *[]string) []any {
