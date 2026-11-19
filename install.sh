@@ -36,7 +36,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 curl -fsSL "${base}/${name}.tar.gz" -o "$tmp/graft.tar.gz"
 curl -fsSL "${base}/checksums.txt" -o "$tmp/checksums.txt"
-expected=$(awk -v f="${name}.tar.gz" '$2 == f { print $1 }' "$tmp/checksums.txt")
+expected=$(awk -v f="${name}.tar.gz" '{ n=$2; sub(/^\.\//, "", n); if (n == f) print $1 }' "$tmp/checksums.txt")
 if [ -z "$expected" ]; then
   echo "no checksum for ${name}.tar.gz" >&2
   exit 1
