@@ -9,7 +9,7 @@ Run [Codex](https://github.com/openai/codex) against other models without touchi
 
 Plain `codex` still shows the built-in GPT list. A graft session only lists that provider's models.
 
-Codex allows a pasted image or `view_image` only when the catalog lists `image` in `input_modalities`. `grok-4.7`, `grok-4.6`, and `deepseek-flash` do. `deepseek-v4-pro` stays text-only. Graft does not rewrite image parts; both vision upstreams accept the Responses `input_image` Codex already sends. `supports_image_detail_original` stays false, so Codex sends its resized JPEG or PNG.
+Each model’s `input` and `reasoning` are read from `config.toml`. Codex allows a pasted image or `view_image` only when `input` includes `image`. The shipped file sets that for `grok-4.7`, `grok-4.6`, and `deepseek-flash`. `deepseek-v4-pro` is `input = ["text"]`. A bare `models = ["id"]` list stays text-only, with reasoning `low`, `medium`, and `high`. Graft does not rewrite image parts. `supports_image_detail_original` stays false, so Codex sends its resized JPEG or PNG.
 
 ## Requirements
 
@@ -78,6 +78,13 @@ auth = "api-key"
 key_env = "MOONSHOT_API_KEY"
 context_window = 262144
 models = ["kimi-k2"]
+
+# or, when the model accepts images or a different effort list:
+# [[providers.kimi.models]]
+# id = "kimi-k2"
+# display_name = "Kimi K2"
+# input = ["text"]
+# reasoning = ["low", "high"]
 ```
 
 Confirm the upstream actually implements `/responses` before adding it. A Chat Completions endpoint will not work.

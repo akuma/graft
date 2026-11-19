@@ -8,8 +8,14 @@ import (
 )
 
 func TestGrokCatalogContainsOnlyItsModels(t *testing.T) {
-	p := &config.Provider{Name: "grok", Label: "Grok Build", Models: []string{"grok-4.7", "grok-4.6"}, ContextWindow: 500000}
-	for _, slug := range p.Models {
+	p := &config.Provider{
+		Name: "grok", Label: "Grok Build", ContextWindow: 500000,
+		Models: []config.Model{
+			{Slug: "grok-4.7", DisplayName: "Grok 4.7", Reasoning: []string{"low", "medium", "high", "xhigh"}},
+			{Slug: "grok-4.6"},
+		},
+	}
+	for _, slug := range p.Slugs() {
 		entry := Entry(p, slug)
 		if strings.HasPrefix(entry["slug"].(string), "gpt-") {
 			t.Fatalf("gpt slug leaked: %v", entry["slug"])
@@ -19,6 +25,9 @@ func TestGrokCatalogContainsOnlyItsModels(t *testing.T) {
 	if entry["apply_patch_tool_type"] != nil {
 		t.Fatal("grok should not advertise freeform apply_patch")
 	}
+	if entry["display_name"] != "Grok 4.7" {
+		t.Fatalf("display_name = %v", entry["display_name"])
+	}
 	if entry["context_window"] != 500000 || entry["max_context_window"] != 500000 {
 		t.Fatalf("context = %v / %v", entry["context_window"], entry["max_context_window"])
 	}
@@ -26,33 +35,35 @@ func TestGrokCatalogContainsOnlyItsModels(t *testing.T) {
 	if strings.Join(efforts, ",") != "low,medium,high,xhigh" {
 		t.Fatalf("grok efforts = %v", efforts)
 	}
-	deepseek := Entry(&config.Provider{Name: "deepseek", Label: "DeepSeek"}, "deepseek-v4-pro")
-	if strings.Join(effortNames(deepseek["supported_reasoning_levels"].([]any)), ",") != "low,high,max" {
-		t.Fatalf("deepseek efforts = %v", effortNames(deepseek["supported_reasoning_levels"].([]any)))
+	bare := Entry(p, "grok-4.6")
+	if strings.Join(effortNames(bare["supported_reasoning_levels"].([]any)), ",") != "low,medium,high" {
+		t.Fatalf("default efforts = %v", effortNames(bare["supported_reasoning_levels"].([]any)))
 	}
-	if deepseek["default_reasoning_level"] != "high" {
-		t.Fatalf("deepseek default = %v", deepseek["default_reasoning_level"])
+	if bare["display_name"] != "grok-4.6" {
+		t.Fatalf("display_name = %v", bare["display_name"])
 	}
 }
 
 func TestImageInputFollowsTheModel(t *testing.T) {
-	grok := &config.Provider{Name: "grok", Label: "Grok Build"}
-	for _, slug := range []string{"grok-4.7", "grok-4.6"} {
-		entry := Entry(grok, slug)
-		if got := strings.Join(stringsOf(entry["input_modalities"].([]any)), ","); got != "text,image" {
-			t.Fatalf("%s modalities = %s", slug, got)
-		}
-		if entry["supports_image_detail_original"] != false {
-			t.Fatalf("%s original detail = %v", slug, entry["supports_image_detail_original"])
-		}
+	p := &config.Provider{
+		Name: "custom", Label: "Custom",
+		Models: []config.Model{
+			{Slug: "sees", Input: []string{"text", "image"}},
+			{Slug: "blind", Input: []string{"text"}},
+			{Slug: "omitted"},
+		},
 	}
-	flash := Entry(&config.Provider{Name: "deepseek", Label: "DeepSeek"}, "deepseek-flash")
-	if got := strings.Join(stringsOf(flash["input_modalities"].([]any)), ","); got != "text,image" {
-		t.Fatalf("flash modalities = %s", got)
+	if got := strings.Join(stringsOf(Entry(p, "sees")["input_modalities"].([]any)), ","); got != "text,image" {
+		t.Fatalf("sees modalities = %s", got)
 	}
-	pro := Entry(&config.Provider{Name: "deepseek", Label: "DeepSeek"}, "deepseek-v4-pro")
-	if got := strings.Join(stringsOf(pro["input_modalities"].([]any)), ","); got != "text" {
-		t.Fatalf("v4-pro modalities = %s", got)
+	if Entry(p, "sees")["supports_image_detail_original"] != false {
+		t.Fatal("original detail was enabled")
+	}
+	if got := strings.Join(stringsOf(Entry(p, "blind")["input_modalities"].([]any)), ","); got != "text" {
+		t.Fatalf("blind modalities = %s", got)
+	}
+	if got := strings.Join(stringsOf(Entry(p, "omitted")["input_modalities"].([]any)), ","); got != "text" {
+		t.Fatalf("omitted modalities = %s", got)
 	}
 }
 
@@ -84,6 +95,31 @@ func TestStrayConfigKeysDoNotEnterTheCatalog(t *testing.T) {
 	}
 	if entry["shell_type"] != "shell_command" {
 		t.Fatalf("shell_type = %v", entry["shell_type"])
+	}
+}
+
+func TestDefaultConfigBuildsTheCatalog(t *testing.T) {
+	cfg, err := config.Parse("default", []byte(config.DefaultConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	flash := Entry(cfg.Providers["deepseek"], "deepseek-flash")
+	if strings.Join(stringsOf(flash["input_modalities"].([]any)), ",") != "text,image" {
+		t.Fatalf("flash input = %v", flash["input_modalities"])
+	}
+	if strings.Join(effortNames(flash["supported_reasoning_levels"].([]any)), ",") != "low,high,max" {
+		t.Fatalf("flash efforts = %v", flash["supported_reasoning_levels"])
+	}
+	if flash["apply_patch_tool_type"] != "freeform" || flash["shell_type"] != "shell_command" || flash["multi_agent_version"] != "v2" {
+		t.Fatalf("flash flags = apply %v shell %v multi %v", flash["apply_patch_tool_type"], flash["shell_type"], flash["multi_agent_version"])
+	}
+	pro := Entry(cfg.Providers["deepseek"], "deepseek-v4-pro")
+	if strings.Join(stringsOf(pro["input_modalities"].([]any)), ",") != "text" {
+		t.Fatalf("pro input = %v", pro["input_modalities"])
+	}
+	grok := Entry(cfg.Providers["grok"], "grok-4.7")
+	if grok["apply_patch_tool_type"] != nil || grok["shell_type"] != "unified_exec" {
+		t.Fatalf("grok flags = apply %v shell %v", grok["apply_patch_tool_type"], grok["shell_type"])
 	}
 }
 

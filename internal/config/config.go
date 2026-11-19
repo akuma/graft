@@ -36,7 +36,18 @@ context_window = 500000
 # grok's proxy rejects codex multi-agent namespaces and strict web_search args
 disable_agent_tools = true
 disable_web_search = true
-models = ["grok-4.7", "grok-4.6"]
+
+[[providers.grok.models]]
+id = "grok-4.7"
+display_name = "Grok 4.7"
+input = ["text", "image"]
+reasoning = ["low", "medium", "high", "xhigh"]
+
+[[providers.grok.models]]
+id = "grok-4.6"
+display_name = "Grok 4.6"
+input = ["text", "image"]
+reasoning = ["low", "medium", "high", "xhigh"]
 
 [providers.deepseek]
 label = "DeepSeek"
@@ -49,8 +60,34 @@ secrets_key = "deepseek"
 context_window = 1048576
 disable_agent_tools = false
 disable_web_search = false
-models = ["deepseek-flash", "deepseek-v4-pro"]
+# Codex catalog fields. Omitted keys stay at the text-only, no-patch defaults.
+shell_type = "shell_command"
+apply_patch_tool_type = "freeform"
+supports_search_tool = true
+multi_agent_version = "v2"
+supports_reasoning_summaries = true
+
+[[providers.deepseek.models]]
+id = "deepseek-flash"
+display_name = "DeepSeek Flash"
+input = ["text", "image"]
+reasoning = ["low", "high", "max"]
+
+[[providers.deepseek.models]]
+id = "deepseek-v4-pro"
+display_name = "DeepSeek V4 Pro"
+input = ["text"]
+reasoning = ["low", "high", "max"]
 `
+
+// Model is one catalog entry. Input and reasoning come from config; a bare
+// id means text input and the default low/medium/high efforts.
+type Model struct {
+	Slug        string
+	DisplayName string
+	Input       []string
+	Reasoning   []string
+}
 
 // Provider is one upstream Codex can be pointed at.
 type Provider struct {
@@ -59,7 +96,7 @@ type Provider struct {
 	Transport         string
 	Upstream          string
 	Auth              string
-	Models            []string
+	Models            []Model
 	EnvKey            string
 	ContextWindow     int
 	AuthSource        string
@@ -69,6 +106,27 @@ type Provider struct {
 	DisableWebSearch  bool
 	Port              int
 	Extra             map[string]any
+}
+
+// Slugs is the model ids in file order.
+func (p Provider) Slugs() []string {
+	out := make([]string, 0, len(p.Models))
+	for _, m := range p.Models {
+		if m.Slug != "" {
+			out = append(out, m.Slug)
+		}
+	}
+	return out
+}
+
+// FindModel returns the configured model, or a zero model with that slug.
+func (p Provider) FindModel(slug string) Model {
+	for _, m := range p.Models {
+		if m.Slug == slug {
+			return m
+		}
+	}
+	return Model{Slug: slug}
 }
 
 // IsThin reports whether requests must be rewritten before they hit Upstream.
@@ -115,8 +173,8 @@ func (c *Config) ResolveModel(model, provider string) (*Provider, string, error)
 		var known []string
 		for _, name := range c.Order {
 			p := c.Providers[name]
-			known = append(known, p.Models...)
-			for _, slug := range p.Models {
+			known = append(known, p.Slugs()...)
+			for _, slug := range p.Slugs() {
 				if slug == normalized {
 					return p, normalized, nil
 				}
@@ -130,8 +188,8 @@ func (c *Config) ResolveModel(model, provider string) (*Provider, string, error)
 			return nil, "", err
 		}
 		slug := ""
-		if len(p.Models) > 0 {
-			slug = p.Models[0]
+		if slugs := p.Slugs(); len(slugs) > 0 {
+			slug = slugs[0]
 		}
 		return p, slug, nil
 	}
@@ -215,7 +273,7 @@ func Parse(path string, data []byte) (*Config, error) {
 			Transport:         str(spec["transport"], "direct"),
 			Upstream:          str(spec["upstream"], ""),
 			Auth:              str(spec["auth"], "api-key"),
-			Models:            strSlice(spec["models"]),
+			Models:            parseModels(spec["models"]),
 			EnvKey:            str(spec["env_key"], ""),
 			ContextWindow:     intval(spec["context_window"], 0),
 			AuthSource:        str(spec["auth_source"], ""),
@@ -296,6 +354,58 @@ func intval(v any, fallback int) int {
 func boolval(v any) bool {
 	b, _ := v.(bool)
 	return b
+}
+
+func parseModels(v any) []Model {
+	switch items := v.(type) {
+	case []Model:
+		return items
+	case []string:
+		out := make([]Model, len(items))
+		for i, slug := range items {
+			out[i] = Model{Slug: slug}
+		}
+		return out
+	case []map[string]any:
+		out := make([]Model, 0, len(items))
+		for _, item := range items {
+			if m, ok := modelFromMap(item); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	case []any:
+		out := make([]Model, 0, len(items))
+		for _, item := range items {
+			switch m := item.(type) {
+			case string:
+				out = append(out, Model{Slug: m})
+			case map[string]any:
+				if model, ok := modelFromMap(m); ok {
+					out = append(out, model)
+				}
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func modelFromMap(m map[string]any) (Model, bool) {
+	slug := str(m["id"], "")
+	if slug == "" {
+		slug = str(m["slug"], "")
+	}
+	if slug == "" {
+		return Model{}, false
+	}
+	return Model{
+		Slug:        slug,
+		DisplayName: str(m["display_name"], ""),
+		Input:       strSlice(m["input"]),
+		Reasoning:   strSlice(m["reasoning"]),
+	}, true
 }
 
 func strSlice(v any) []string {

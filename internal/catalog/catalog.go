@@ -58,43 +58,12 @@ var conservative = map[string]any{
 	"reasoning_summary_format":     "experimental",
 }
 
-var deepseekFlags = map[string]any{
-	"apply_patch_tool_type":        "freeform",
-	"web_search_tool_type":         "text",
-	"supports_search_tool":         true,
-	"use_responses_lite":           false,
-	"tool_mode":                    nil,
-	"multi_agent_version":          "v2",
-	"supports_reasoning_summaries": true,
-	"reasoning_summary_format":     "experimental",
-	"shell_type":                   "shell_command",
-}
-
-var reasoningLevels = []any{
-	map[string]any{"effort": "low", "description": "Fast responses with lighter reasoning"},
-	map[string]any{"effort": "medium", "description": "Balanced reasoning for everyday work"},
-	map[string]any{"effort": "high", "description": "Greater reasoning depth for complex problems"},
-}
-
-// DeepSeek's Responses API has three real depths. medium and xhigh are
-// accepted but mapped to high, so the picker must not offer them.
-var deepseekReasoningLevels = []any{
-	map[string]any{"effort": "low", "description": "Fast responses with lighter reasoning"},
-	map[string]any{"effort": "high", "description": "Greater reasoning depth for everyday work"},
-	map[string]any{"effort": "max", "description": "Maximum reasoning depth for complex problems"},
-}
-
-// grok-4.6 and later accept a fourth effort. xAI treats unknown xhigh as high
-// on older models; both models in the grok provider support it.
-var grokReasoningLevels = append(append([]any{}, reasoningLevels...),
-	map[string]any{"effort": "xhigh", "description": "Extra high reasoning depth for complex problems"},
-)
-
-var displayNames = map[string]string{
-	"grok-4.7":        "Grok 4.7",
-	"grok-4.6":        "Grok 4.6",
-	"deepseek-flash":  "DeepSeek Flash",
-	"deepseek-v4-pro": "DeepSeek V4 Pro",
+var effortDescription = map[string]string{
+	"low":    "Fast responses with lighter reasoning",
+	"medium": "Balanced reasoning for everyday work",
+	"high":   "Greater reasoning depth for complex problems",
+	"xhigh":  "Extra high reasoning depth for complex problems",
+	"max":    "Maximum reasoning depth for complex problems",
 }
 
 // Path is where the provider's catalog is written.
@@ -111,11 +80,6 @@ func Entry(p *config.Provider, slug string) map[string]any {
 	for k, v := range conservative {
 		entry[k] = v
 	}
-	if p.Name == "deepseek" {
-		for k, v := range deepseekFlags {
-			entry[k] = v
-		}
-	}
 	overridable := map[string]bool{}
 	for k := range baseEntry {
 		overridable[k] = true
@@ -128,7 +92,8 @@ func Entry(p *config.Provider, slug string) map[string]any {
 			entry[k] = v
 		}
 	}
-	name := displayNames[slug]
+	model := p.FindModel(slug)
+	name := model.DisplayName
 	if name == "" {
 		name = slug
 	}
@@ -136,14 +101,7 @@ func Entry(p *config.Provider, slug string) map[string]any {
 	entry["display_name"] = name
 	entry["description"] = p.Label + " via graft"
 	entry["default_reasoning_level"] = "high"
-	switch p.Name {
-	case "grok":
-		entry["supported_reasoning_levels"] = grokReasoningLevels
-	case "deepseek":
-		entry["supported_reasoning_levels"] = deepseekReasoningLevels
-	default:
-		entry["supported_reasoning_levels"] = reasoningLevels
-	}
+	entry["supported_reasoning_levels"] = reasoningLevels(model.Reasoning)
 	text := instructions
 	if text == "" {
 		text = "You are Codex, an autonomous coding agent. Complete the user's request."
@@ -153,20 +111,36 @@ func Entry(p *config.Provider, slug string) map[string]any {
 		entry["context_window"] = p.ContextWindow
 		entry["max_context_window"] = p.ContextWindow
 	}
-	// Codex gates pasted images and view_image on this field. Both Grok models
-	// and deepseek-flash accept Responses input_image. deepseek-v4-pro does not,
-	// and advertising image there makes Codex send a part the API rejects.
-	// detail "original" is left off: Codex would keep full-resolution bytes, and
-	// Grok's documented detail value is "high". The resized JPEG/PNG path is the
-	// one both upstreams document.
-	if acceptsImages(p.Name, slug) {
-		entry["input_modalities"] = []any{"text", "image"}
+	// Codex gates pasted images and view_image on input_modalities. The model
+	// config lists them. An empty input stays text-only. detail "original"
+	// stays off so Codex sends a resized JPEG or PNG.
+	if len(model.Input) > 0 {
+		entry["input_modalities"] = stringsToAny(model.Input)
 	}
 	return entry
 }
 
-func acceptsImages(provider, slug string) bool {
-	return provider == "grok" || slug == "deepseek-flash"
+func reasoningLevels(efforts []string) []any {
+	if len(efforts) == 0 {
+		efforts = []string{"low", "medium", "high"}
+	}
+	out := make([]any, len(efforts))
+	for i, effort := range efforts {
+		text := effortDescription[effort]
+		if text == "" {
+			text = effort
+		}
+		out[i] = map[string]any{"effort": effort, "description": text}
+	}
+	return out
+}
+
+func stringsToAny(values []string) []any {
+	out := make([]any, len(values))
+	for i, v := range values {
+		out[i] = v
+	}
+	return out
 }
 
 // Write writes the catalog if it changed. Providers with no models are skipped.
@@ -175,7 +149,7 @@ func Write(cfg *config.Config, p *config.Provider, verbose bool) (string, error)
 		return "", nil
 	}
 	models := make([]any, 0, len(p.Models))
-	for _, slug := range p.Models {
+	for _, slug := range p.Slugs() {
 		models = append(models, Entry(p, slug))
 	}
 	payload, err := json.MarshalIndent(map[string]any{"models": models}, "", "  ")

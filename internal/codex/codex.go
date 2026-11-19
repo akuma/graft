@@ -28,8 +28,8 @@ func ProfilePath(cfg *config.Config, p *config.Provider) string {
 func ProfileBody(cfg *config.Config, p *config.Provider) string {
 	id := p.ProfileName(cfg.ProfilePrefix)
 	model := ""
-	if len(p.Models) > 0 {
-		model = p.Models[0]
+	if slugs := p.Slugs(); len(slugs) > 0 {
+		model = slugs[0]
 	}
 	baseURL := p.Upstream
 	if p.IsThin() {
@@ -43,7 +43,7 @@ func ProfileBody(cfg *config.Config, p *config.Provider) string {
 	if p.ContextWindow > 0 {
 		fmt.Fprintf(&b, "model_context_window = %d\n", p.ContextWindow)
 	}
-	if len(p.Models) > 0 {
+	if len(p.Slugs()) > 0 {
 		fmt.Fprintf(&b, "model_catalog_json = %q\n", catalog.Path(cfg, p))
 	}
 	b.WriteString("suppress_unstable_features_warning = true\n")

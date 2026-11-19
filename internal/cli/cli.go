@@ -42,7 +42,7 @@ func Main(argv []string) int {
 	case "models":
 		for _, name := range cfg.Order {
 			p := cfg.Providers[name]
-			for _, model := range p.Models {
+			for _, model := range p.Slugs() {
 				fmt.Printf("%-18s -> %s (%s)\n", model, p.Name, p.Transport)
 			}
 		}
@@ -125,7 +125,7 @@ func cmdStatus(cfg *config.Config) int {
 			profile = "profile ok"
 		}
 		fmt.Printf("%-10s %-7s %-12s proxy=%s\n", p.Name, p.Transport, profile, state)
-		fmt.Printf("%-10s models: %s\n", "", strings.Join(p.Models, ", "))
+		fmt.Printf("%-10s models: %s\n", "", strings.Join(p.Slugs(), ", "))
 		fmt.Printf("%-10s base_url: %s\n", "", p.Upstream)
 	}
 	return 0
