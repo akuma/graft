@@ -11,21 +11,22 @@ Plain `codex` still shows the built-in GPT list. A graft session only lists that
 
 ## Requirements
 
-- Go 1.23+
 - Codex CLI
 - Grok: [Grok CLI](https://x.ai) signed in (`grok login`)
 - DeepSeek: an API key
 
+Go is only needed to build from source.
+
 ## Install
 
 ```sh
-git clone https://github.com/akuma/graft.git
-cd graft
-go build -o ~/.local/bin/graft ./cmd/graft
+curl -fsSL https://raw.githubusercontent.com/akuma/graft/main/install.sh | sh
 graft init
 ```
 
-Once the repository is public, `go install github.com/akuma/graft/cmd/graft@latest` does the same thing.
+This downloads the latest release binary into `~/.local/bin`. `GRAFT_VERSION=v0.1.0` pins a version. `GRAFT_BIN` changes the directory.
+
+From a checkout: `go build -o ~/.local/bin/graft ./cmd/graft`, or `go install github.com/akuma/graft/cmd/graft@latest`.
 
 `graft init` writes `~/.config/graft/config.toml` and one Codex profile per provider (`~/.codex/graft-<provider>.config.toml`). It does not write `~/.codex/config.toml` or `~/.codex/models.json`.
 
