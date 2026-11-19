@@ -31,7 +31,8 @@ upstream = "https://cli-chat-proxy.grok.com/v1"
 # borrow | api-key. borrow reads a CLI subscription token per request
 auth = "borrow"
 auth_source = "grok-cli"
-context_window = 256000
+# grok-4.7 and grok-4.6 publish a 500k window
+context_window = 500000
 # grok's proxy rejects codex multi-agent namespaces and strict web_search args
 disable_agent_tools = true
 disable_web_search = true

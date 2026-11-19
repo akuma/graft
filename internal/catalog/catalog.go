@@ -72,8 +72,14 @@ var deepseekFlags = map[string]any{
 var reasoningLevels = []any{
 	map[string]any{"effort": "low", "description": "Fast responses with lighter reasoning"},
 	map[string]any{"effort": "medium", "description": "Balanced reasoning for everyday work"},
-	map[string]any{"effort": "high", "description": "Extra high reasoning depth for complex problems"},
+	map[string]any{"effort": "high", "description": "Greater reasoning depth for complex problems"},
 }
+
+// grok-4.6 and later accept a fourth effort. xAI treats unknown xhigh as high
+// on older models; both models in the grok provider support it.
+var grokReasoningLevels = append(append([]any{}, reasoningLevels...),
+	map[string]any{"effort": "xhigh", "description": "Extra high reasoning depth for complex problems"},
+)
 
 var displayNames = map[string]string{
 	"grok-4.7":        "Grok 4.7",
@@ -121,7 +127,11 @@ func Entry(p *config.Provider, slug string) map[string]any {
 	entry["display_name"] = name
 	entry["description"] = p.Label + " via graft"
 	entry["default_reasoning_level"] = "high"
-	entry["supported_reasoning_levels"] = reasoningLevels
+	if p.Name == "grok" {
+		entry["supported_reasoning_levels"] = grokReasoningLevels
+	} else {
+		entry["supported_reasoning_levels"] = reasoningLevels
+	}
 	text := instructions
 	if text == "" {
 		text = "You are Codex, an autonomous coding agent. Complete the user's request."

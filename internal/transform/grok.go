@@ -6,6 +6,7 @@
 //	R1 namespace tools   -> 422 unknown variant `namespace`
 //	R2 web_search extras -> 400 Argument not supported: external_web_access
 //	R3 echoed reasoning  -> 400 Could not decode the compaction blob
+//	R4 orphan tool_choice -> 400 tool_choice set but no tools were specified
 package transform
 
 import "sort"
@@ -24,7 +25,7 @@ type Result struct {
 	Notes []string
 }
 
-// ForGrok applies R1..R3. The input map is not modified.
+// ForGrok applies R1..R4. The input map is not modified.
 // include: ["reasoning.encrypted_content"] is left in place; only echoed
 // reasoning items are rejected.
 func ForGrok(body map[string]any) Result {
@@ -43,7 +44,18 @@ func ForGrok(body map[string]any) Result {
 	if items, ok := out["input"].([]any); ok {
 		out["input"] = dropReasoning(items, &notes)
 	}
+	// Codex local compaction sends tools: [] with tool_choice: "auto".
+	// The same 400 happens when every tool was a dropped namespace.
+	if _, hasChoice := out["tool_choice"]; hasChoice && !hasTools(out) {
+		delete(out, "tool_choice")
+		notes = append(notes, "r4:drop-tool-choice")
+	}
 	return Result{Body: out, Notes: notes}
+}
+
+func hasTools(body map[string]any) bool {
+	tools, ok := body["tools"].([]any)
+	return ok && len(tools) > 0
 }
 
 func dropNamespaces(tools []any, notes *[]string) []any {

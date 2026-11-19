@@ -8,16 +8,36 @@ import (
 )
 
 func TestGrokCatalogContainsOnlyItsModels(t *testing.T) {
-	p := &config.Provider{Name: "grok", Label: "Grok Build", Models: []string{"grok-4.7", "grok-4.6"}, ContextWindow: 256000}
+	p := &config.Provider{Name: "grok", Label: "Grok Build", Models: []string{"grok-4.7", "grok-4.6"}, ContextWindow: 500000}
 	for _, slug := range p.Models {
 		entry := Entry(p, slug)
 		if strings.HasPrefix(entry["slug"].(string), "gpt-") {
 			t.Fatalf("gpt slug leaked: %v", entry["slug"])
 		}
 	}
-	if Entry(p, "grok-4.7")["apply_patch_tool_type"] != nil {
+	entry := Entry(p, "grok-4.7")
+	if entry["apply_patch_tool_type"] != nil {
 		t.Fatal("grok should not advertise freeform apply_patch")
 	}
+	if entry["context_window"] != 500000 || entry["max_context_window"] != 500000 {
+		t.Fatalf("context = %v / %v", entry["context_window"], entry["max_context_window"])
+	}
+	efforts := effortNames(entry["supported_reasoning_levels"].([]any))
+	if strings.Join(efforts, ",") != "low,medium,high,xhigh" {
+		t.Fatalf("grok efforts = %v", efforts)
+	}
+	deepseek := Entry(&config.Provider{Name: "deepseek", Label: "DeepSeek"}, "deepseek-v4-pro")
+	if strings.Join(effortNames(deepseek["supported_reasoning_levels"].([]any)), ",") != "low,medium,high" {
+		t.Fatal("xhigh leaked onto deepseek")
+	}
+}
+
+func effortNames(levels []any) []string {
+	names := make([]string, 0, len(levels))
+	for _, raw := range levels {
+		names = append(names, raw.(map[string]any)["effort"].(string))
+	}
+	return names
 }
 
 func TestStrayConfigKeysDoNotEnterTheCatalog(t *testing.T) {

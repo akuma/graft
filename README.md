@@ -59,6 +59,7 @@ Codex speaks the Responses API. DeepSeek accepts that directly. Grok's subscript
 - `tools[].type = "namespace"` (multi-agent and MCP bundles) → 422
 - extra fields on `web_search`, such as `external_web_access` → 400
 - replayed `reasoning` items → 400 (`Could not decode the compaction blob`)
+- `tool_choice` when `tools` is missing or empty (local compaction sends `tools: []` with `tool_choice: "auto"`) → 400
 
 Rules live in `internal/transform`.
 

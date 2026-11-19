@@ -84,6 +84,61 @@ func TestUnknownToolTypesAreDropped(t *testing.T) {
 	}
 }
 
+func TestToolChoiceDroppedWhenToolsEmpty(t *testing.T) {
+	body := base()
+	body["tool_choice"] = "auto"
+	body["parallel_tool_calls"] = true
+	got := ForGrok(body)
+	if _, ok := got.Body["tool_choice"]; ok {
+		t.Fatalf("tool_choice = %#v", got.Body["tool_choice"])
+	}
+	if got.Body["parallel_tool_calls"] != true {
+		t.Fatalf("parallel_tool_calls = %#v", got.Body["parallel_tool_calls"])
+	}
+	if !hasNote(got.Notes, "r4:drop-tool-choice") {
+		t.Fatalf("notes = %v", got.Notes)
+	}
+}
+
+func TestToolChoiceDroppedWhenToolsMissing(t *testing.T) {
+	body := base()
+	delete(body, "tools")
+	body["tool_choice"] = "none"
+	got := ForGrok(body)
+	if _, ok := got.Body["tool_choice"]; ok {
+		t.Fatalf("tool_choice = %#v", got.Body["tool_choice"])
+	}
+}
+
+func TestToolChoiceDroppedWhenOnlyNamespacesRemain(t *testing.T) {
+	body := base()
+	body["tools"] = []any{map[string]any{"type": "namespace", "name": "mcp__codegraph"}}
+	body["tool_choice"] = "auto"
+	got := ForGrok(body)
+	if len(got.Body["tools"].([]any)) != 0 {
+		t.Fatalf("tools = %#v", got.Body["tools"])
+	}
+	if _, ok := got.Body["tool_choice"]; ok {
+		t.Fatal("tool_choice survived an empty tool list")
+	}
+}
+
+func TestToolChoiceKeptWhenToolsRemain(t *testing.T) {
+	body := base()
+	body["tools"] = []any{
+		map[string]any{"type": "function", "name": "exec_command"},
+		map[string]any{"type": "namespace", "name": "mcp__codegraph"},
+	}
+	body["tool_choice"] = "auto"
+	got := ForGrok(body)
+	if got.Body["tool_choice"] != "auto" {
+		t.Fatalf("tool_choice = %#v", got.Body["tool_choice"])
+	}
+	if hasNote(got.Notes, "r4:drop-tool-choice") {
+		t.Fatalf("notes = %v", got.Notes)
+	}
+}
+
 func TestInputIsNotMutated(t *testing.T) {
 	body := base()
 	body["tools"] = []any{map[string]any{"type": "namespace", "name": "web"}}
