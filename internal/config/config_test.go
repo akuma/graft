@@ -33,6 +33,12 @@ func TestDefaultConfigCarriesModelFacts(t *testing.T) {
 	if grok.Extra["apply_patch_tool_type"] != nil {
 		t.Fatalf("grok extra = %#v", grok.Extra)
 	}
+	if deepseek.AnthropicBase != "https://api.deepseek.com/anthropic" {
+		t.Fatalf("anthropic base = %q", deepseek.AnthropicBase)
+	}
+	if _, ok := deepseek.Extra["anthropic_base"]; ok {
+		t.Fatal("anthropic_base leaked into the codex catalog extra")
+	}
 }
 
 func TestBareModelListStaysTextOnly(t *testing.T) {

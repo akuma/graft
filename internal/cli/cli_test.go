@@ -27,7 +27,7 @@ func TestHelpIncludesVersion(t *testing.T) {
 	version.Version = "v0.1.5"
 	t.Cleanup(func() { version.Version = old })
 	out := captureStdout(t, func() int { return Main(nil) })
-	if !strings.Contains(out, "graft v0.1.5") || !strings.Contains(out, "graft version") {
+	if !strings.Contains(out, "graft v0.1.5") || !strings.Contains(out, "graft version") || !strings.Contains(out, "graft claude") {
 		t.Fatalf("help = %q", out)
 	}
 }

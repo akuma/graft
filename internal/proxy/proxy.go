@@ -119,7 +119,7 @@ func forward(p *config.Provider, w http.ResponseWriter, r *http.Request, body []
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
 		return
 	}
-	for k, v := range authHeaders(p) {
+	for k, v := range AuthHeaders(p) {
 		req.Header.Set(k, v)
 	}
 	req.Header.Set("Accept-Encoding", "identity")
@@ -167,7 +167,9 @@ func forward(p *config.Provider, w http.ResponseWriter, r *http.Request, body []
 	}
 }
 
-func authHeaders(p *config.Provider) map[string]string {
+// AuthHeaders are the upstream credential headers. The Grok subscription token
+// is read on each call and is never written back.
+func AuthHeaders(p *config.Provider) map[string]string {
 	h := map[string]string{"Content-Type": "application/json", "Accept": "text/event-stream"}
 	switch p.Auth {
 	case "borrow":

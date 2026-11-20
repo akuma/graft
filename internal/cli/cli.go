@@ -7,17 +7,19 @@ import (
 	"os"
 	"strings"
 
+	"github.com/akuma/graft/internal/claude"
 	"github.com/akuma/graft/internal/codex"
 	"github.com/akuma/graft/internal/config"
 	"github.com/akuma/graft/internal/creds"
+	"github.com/akuma/graft/internal/gateway"
 	"github.com/akuma/graft/internal/proxy"
 	"github.com/akuma/graft/internal/version"
 )
 
 // Main runs graft and returns a process exit code.
 func Main(argv []string) int {
-	if len(argv) > 0 && argv[0] == "codex" {
-		return cmdCodex(argv[1:])
+	if len(argv) > 0 && (argv[0] == "codex" || argv[0] == "claude") {
+		return cmdClient(argv[0], argv[1:])
 	}
 	if len(argv) == 1 && isVersion(argv[0]) {
 		fmt.Println(version.String())
@@ -58,6 +60,8 @@ func Main(argv []string) int {
 		return cmdDoctor(cfg)
 	case "proxy":
 		return cmdProxy(cfg, rest[1:])
+	case "gateway":
+		return cmdGateway(cfg, rest[1:])
 	case "key":
 		return cmdKey(rest[1:])
 	default:
@@ -67,8 +71,44 @@ func Main(argv []string) int {
 	}
 }
 
-func cmdCodex(args []string) int {
-	var model, provider, configPath string
+func cmdClient(kind string, args []string) int {
+	model, provider, configPath, rest, code := takeLaunchFlags(args)
+	if code >= 0 {
+		return code
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	p, slug, err := cfg.ResolveModel(model, provider)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	var launchErr error
+	if kind == "claude" {
+		launchErr = claude.Launch(cfg, p, slug, rest)
+	} else {
+		launchErr = codex.Launch(cfg, p, slug, rest)
+	}
+	if launchErr != nil {
+		switch exit := launchErr.(type) {
+		case *codex.ExitError:
+			return exit.Code
+		case *claude.ExitError:
+			return exit.Code
+		}
+		fmt.Fprintln(os.Stderr, launchErr)
+		return 1
+	}
+	return 0
+}
+
+// takeLaunchFlags reads graft's own flags. The first flag it does not own
+// stops the scan, so a later client flag such as --yolo is passed through.
+// code is -1 when parsing should continue.
+func takeLaunchFlags(args []string) (model, provider, configPath string, rest []string, code int) {
 	for len(args) > 0 {
 		switch {
 		case args[0] == "--config" && len(args) > 1:
@@ -76,7 +116,7 @@ func cmdCodex(args []string) int {
 		case args[0] == "-m" || args[0] == "--model":
 			if len(args) < 2 {
 				fmt.Fprintln(os.Stderr, "-m needs a model")
-				return 2
+				return "", "", "", nil, 2
 			}
 			model, args = args[1], args[2:]
 		case strings.HasPrefix(args[0], "--model="):
@@ -91,24 +131,7 @@ done:
 	if len(args) > 0 && args[0] == "--" {
 		args = args[1:]
 	}
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	p, slug, err := cfg.ResolveModel(model, provider)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 2
-	}
-	if err := codex.Launch(cfg, p, slug, args); err != nil {
-		if exit, ok := err.(*codex.ExitError); ok {
-			return exit.Code
-		}
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	return 0
+	return model, provider, configPath, args, -1
 }
 
 func isVersion(arg string) bool {
@@ -137,6 +160,15 @@ func cmdStatus(cfg *config.Config) int {
 		fmt.Printf("%-10s %-7s %-12s proxy=%s\n", p.Name, p.Transport, profile, state)
 		fmt.Printf("%-10s models: %s\n", "", strings.Join(p.Slugs(), ", "))
 		fmt.Printf("%-10s base_url: %s\n", "", p.Upstream)
+		if p.IsThin() {
+			state := "down"
+			if gateway.Healthy(p) {
+				state = "healthy"
+			}
+			fmt.Printf("%-10s claude: http://127.0.0.1:%d (%s)\n", "", gateway.Port(p), state)
+		} else if p.AnthropicBase != "" {
+			fmt.Printf("%-10s claude: %s\n", "", p.AnthropicBase)
+		}
 	}
 	return 0
 }
@@ -248,6 +280,33 @@ func cmdProxy(cfg *config.Config, args []string) int {
 	return 0
 }
 
+func cmdGateway(cfg *config.Config, args []string) int {
+	if len(args) == 0 || args[0] != "run" {
+		fmt.Fprintln(os.Stderr, "usage: graft gateway run --provider name")
+		return 2
+	}
+	var name string
+	for i := 1; i < len(args); i++ {
+		if args[i] == "--provider" && i+1 < len(args) {
+			name = args[i+1]
+		}
+	}
+	if name == "" {
+		fmt.Fprintln(os.Stderr, "gateway run needs --provider")
+		return 2
+	}
+	p, err := cfg.ProviderNamed(name)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	if err := gateway.Serve(p); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
 func cmdKey(args []string) int {
 	if len(args) == 0 || (args[0] != "set" && args[0] != "list") {
 		fmt.Fprintln(os.Stderr, "usage: graft key set <slot> [value] | graft key list")
@@ -351,11 +410,13 @@ func finish(err error) int {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintf(w, "graft %s runs Codex against a non-OpenAI provider.\n", version.String())
+	fmt.Fprintf(w, "graft %s runs Codex or Claude Code against a non-OpenAI provider.\n", version.String())
 	fmt.Fprint(w, `
 Usage:
   graft codex -m grok-4.7 [codex args...]
   graft codex -m deepseek-flash [codex args...]
+  graft claude -m grok-4.7 [claude args...]
+  graft claude -m deepseek-flash [claude args...]
   graft version
   graft init
   graft sync [-q]
@@ -367,6 +428,6 @@ Usage:
   graft key list
 
 --config <file> selects the config. -m, --provider and --config before the
-codex arguments are graft's; everything after them is passed to codex.
+client arguments are graft's; everything after them is passed to codex or claude.
 `)
 }

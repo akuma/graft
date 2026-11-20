@@ -53,6 +53,8 @@ reasoning = ["low", "medium", "high", "xhigh"]
 label = "DeepSeek"
 transport = "direct"
 upstream = "https://api.deepseek.com/"
+# Claude Code appends /v1/messages. No trailing /v1.
+anthropic_base = "https://api.deepseek.com/anthropic"
 auth = "api-key"
 # graft reads $DEEPSEEK_API_KEY, else ~/.config/graft/secrets.toml [keys].deepseek
 key_env = "DEEPSEEK_API_KEY"
@@ -105,7 +107,10 @@ type Provider struct {
 	DisableAgentTools bool
 	DisableWebSearch  bool
 	Port              int
-	Extra             map[string]any
+	// AnthropicBase is the Messages API root for Claude Code, with no /v1 suffix.
+	// Empty means this provider has no native Messages endpoint.
+	AnthropicBase string
+	Extra         map[string]any
 }
 
 // Slugs is the model ids in file order.
@@ -282,6 +287,7 @@ func Parse(path string, data []byte) (*Config, error) {
 			DisableAgentTools: boolval(spec["disable_agent_tools"]),
 			DisableWebSearch:  boolval(spec["disable_web_search"]),
 			Port:              intval(spec["port"], proxyPort+i),
+			AnthropicBase:     strings.TrimRight(str(spec["anthropic_base"], ""), "/"),
 			Extra:             extraKeys(spec),
 		}
 		providers[name] = p
@@ -319,7 +325,7 @@ func extraKeys(spec map[string]any) map[string]any {
 		"label": true, "transport": true, "upstream": true, "auth": true,
 		"models": true, "env_key": true, "context_window": true, "auth_source": true,
 		"key_env": true, "secrets_key": true, "disable_agent_tools": true,
-		"disable_web_search": true, "port": true,
+		"disable_web_search": true, "port": true, "anthropic_base": true,
 	}
 	extra := map[string]any{}
 	for k, v := range spec {
