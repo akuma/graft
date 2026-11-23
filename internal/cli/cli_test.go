@@ -45,6 +45,55 @@ func TestModelsCommandPrintsNamespaces(t *testing.T) {
 	}
 }
 
+func TestModelsCommandAlignsColumns(t *testing.T) {
+	path := t.TempDir() + "/config.toml"
+	if err := os.WriteFile(path, []byte(config.DefaultConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() int { return Main([]string{"--config", path, "models"}) })
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("models output is too short: %q", out)
+	}
+	transportColumn := -1
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			t.Fatalf("model row is malformed: %q", line)
+		}
+		transport := fields[len(fields)-1]
+		column := strings.LastIndex(line, transport)
+		if transportColumn == -1 {
+			transportColumn = column
+		} else if column != transportColumn {
+			t.Fatalf("transport column %d does not match %d: %q", column, transportColumn, line)
+		}
+	}
+}
+
+func TestModelsCommandGivesColumnsBreathingRoom(t *testing.T) {
+	path := t.TempDir() + "/config.toml"
+	if err := os.WriteFile(path, []byte(config.DefaultConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() int { return Main([]string{"--config", path, "models"}) })
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			t.Fatalf("model row is malformed: %q", line)
+		}
+		transport := fields[len(fields)-1]
+		column := strings.LastIndex(line, transport)
+		gap := 0
+		for i := column - 1; i >= 0 && line[i] == ' '; i-- {
+			gap++
+		}
+		if gap < 4 {
+			t.Fatalf("transport gap is %d, want at least 4: %q", gap, line)
+		}
+	}
+}
+
 func TestChooseModelReturnsProviderNamespace(t *testing.T) {
 	cfg, err := config.Parse("default", []byte(config.DefaultConfig))
 	if err != nil {

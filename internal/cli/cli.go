@@ -51,10 +51,22 @@ func Main(argv []string) int {
 		quiet := len(rest) > 1 && (rest[1] == "-q" || rest[1] == "--quiet")
 		return finish(codex.Sync(cfg, !quiet))
 	case "models":
+		refWidth, labelWidth := 48, 16
+		for _, name := range cfg.Order {
+			p := cfg.Providers[name]
+			if width := utf8.RuneCountInString(p.Label); width > labelWidth {
+				labelWidth = width
+			}
+			for _, model := range p.Slugs() {
+				if width := utf8.RuneCountInString(name + "/" + model); width > refWidth {
+					refWidth = width
+				}
+			}
+		}
 		for _, name := range cfg.Order {
 			p := cfg.Providers[name]
 			for _, model := range p.Slugs() {
-				fmt.Printf("%-48s %-16s %s\n", name+"/"+model, p.Label, p.Transport)
+				fmt.Printf("%-*s  %-*s    %s\n", refWidth, name+"/"+model, labelWidth, p.Label, p.Transport)
 			}
 		}
 		return 0
