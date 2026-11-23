@@ -2,10 +2,13 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/akuma/graft/internal/claude"
 	"github.com/akuma/graft/internal/codex"
@@ -14,6 +17,7 @@ import (
 	"github.com/akuma/graft/internal/gateway"
 	"github.com/akuma/graft/internal/proxy"
 	"github.com/akuma/graft/internal/version"
+	"golang.org/x/term"
 )
 
 // Main runs graft and returns a process exit code.
@@ -50,7 +54,7 @@ func Main(argv []string) int {
 		for _, name := range cfg.Order {
 			p := cfg.Providers[name]
 			for _, model := range p.Slugs() {
-				fmt.Printf("%-18s -> %s (%s)\n", model, p.Name, p.Transport)
+				fmt.Printf("%-48s %-16s %s\n", name+"/"+model, p.Label, p.Transport)
 			}
 		}
 		return 0
@@ -80,6 +84,14 @@ func cmdClient(kind string, args []string) int {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
+	}
+	if model == "" && isTTY() {
+		var selectErr error
+		model, selectErr = chooseModel(cfg, provider, os.Stdin, os.Stderr)
+		if selectErr != nil {
+			fmt.Fprintln(os.Stderr, selectErr)
+			return 2
+		}
 	}
 	p, slug, err := cfg.ResolveModel(model, provider)
 	if err != nil {
@@ -401,6 +413,293 @@ func takeConfig(argv []string) (string, []string) {
 	return path, rest
 }
 
+type pickerOption struct {
+	provider      string
+	providerLabel string
+	ref           string
+	label         string
+}
+
+func chooseModel(cfg *config.Config, provider string, in io.Reader, out io.Writer) (string, error) {
+	if provider != "" {
+		if _, err := cfg.ProviderNamed(provider); err != nil {
+			return "", err
+		}
+	}
+	var options []pickerOption
+	for _, name := range cfg.Order {
+		if provider != "" && name != provider {
+			continue
+		}
+		p := cfg.Providers[name]
+		for _, model := range p.Models {
+			label := model.DisplayName
+			if label == "" {
+				label = model.Slug
+			}
+			options = append(options, pickerOption{
+				provider:      name,
+				providerLabel: p.Label,
+				ref:           name + "/" + model.Slug,
+				label:         label,
+			})
+		}
+	}
+	if len(options) == 0 {
+		if provider != "" {
+			return "", fmt.Errorf("provider %q has no models", provider)
+		}
+		return "", fmt.Errorf("no models configured")
+	}
+	if f, ok := in.(*os.File); ok && isTerminal(out) && term.IsTerminal(int(f.Fd())) {
+		state, err := term.MakeRaw(int(f.Fd()))
+		if err == nil {
+			defer term.Restore(int(f.Fd()), state)
+			return runModelPicker(options, in, out, colorEnabled())
+		}
+	}
+	return chooseModelNumbered(options, in, out)
+}
+
+func chooseModelNumbered(options []pickerOption, in io.Reader, out io.Writer) (string, error) {
+	fmt.Fprintln(out, "Select a model:")
+	for i, option := range options {
+		fmt.Fprintf(out, "  %d) %-48s %s\n", i+1, option.ref, option.label)
+	}
+	scanner := bufio.NewScanner(in)
+	for {
+		fmt.Fprintf(out, "Model [1-%d], q to cancel: ", len(options))
+		if !scanner.Scan() {
+			return "", fmt.Errorf("selection cancelled")
+		}
+		answer := strings.TrimSpace(scanner.Text())
+		if answer == "" || strings.EqualFold(answer, "q") || strings.EqualFold(answer, "quit") {
+			return "", fmt.Errorf("selection cancelled")
+		}
+		n, err := strconv.Atoi(answer)
+		if err == nil && n >= 1 && n <= len(options) {
+			return options[n-1].ref, nil
+		}
+		fmt.Fprintln(out, "Invalid selection.")
+	}
+}
+
+func runModelPicker(options []pickerOption, in io.Reader, out io.Writer, color bool) (string, error) {
+	selected := 0
+	fmt.Fprint(out, "\x1b[?25l")
+	defer fmt.Fprint(out, "\x1b[?25h")
+	lines := renderModelPicker(out, options, selected, color)
+
+	keys := bufio.NewReader(in)
+	for {
+		key, err := readPickerKey(keys)
+		if err != nil {
+			clearModelPicker(out, lines)
+			return "", fmt.Errorf("selection cancelled")
+		}
+		switch key {
+		case pickerUp:
+			selected = (selected + len(options) - 1) % len(options)
+		case pickerDown:
+			selected = (selected + 1) % len(options)
+		case pickerChoose:
+			clearModelPicker(out, lines)
+			if color {
+				fmt.Fprintf(out, "\x1b[1;32m◆\x1b[0m \x1b[1;36m%s\x1b[0m\r\n", options[selected].ref)
+			} else {
+				fmt.Fprintf(out, "%s\r\n", options[selected].ref)
+			}
+			return options[selected].ref, nil
+		case pickerCancel:
+			clearModelPicker(out, lines)
+			return "", fmt.Errorf("selection cancelled")
+		}
+		clearModelPicker(out, lines)
+		lines = renderModelPicker(out, options, selected, color)
+	}
+}
+
+type pickerKey int
+
+const (
+	pickerNoop pickerKey = iota
+	pickerUp
+	pickerDown
+	pickerChoose
+	pickerCancel
+)
+
+func readPickerKey(in *bufio.Reader) (pickerKey, error) {
+	b, err := in.ReadByte()
+	if err != nil {
+		return pickerNoop, err
+	}
+	switch b {
+	case 0x03, 'q', 'Q':
+		return pickerCancel, nil
+	case '\r', '\n':
+		return pickerChoose, nil
+	case 'k', 'K':
+		return pickerUp, nil
+	case 'j', 'J':
+		return pickerDown, nil
+	case 0x1b:
+		next, err := in.ReadByte()
+		if err != nil {
+			return pickerCancel, nil
+		}
+		if next != '[' && next != 'O' {
+			return pickerNoop, nil
+		}
+		for i := 0; i < 8; i++ {
+			b, err = in.ReadByte()
+			if err != nil {
+				return pickerNoop, err
+			}
+			switch b {
+			case 'A':
+				return pickerUp, nil
+			case 'B':
+				return pickerDown, nil
+			case 'H':
+				return pickerNoop, nil
+			case 'F':
+				return pickerNoop, nil
+			case '~', 'C', 'D':
+				return pickerNoop, nil
+			}
+			if b >= 0x40 && b <= 0x7e {
+				return pickerNoop, nil
+			}
+		}
+	}
+	return pickerNoop, nil
+}
+
+func renderModelPicker(out io.Writer, options []pickerOption, selected int, color bool) int {
+	lines := 0
+	width := pickerWidth(out)
+	headline := func(code, text string) string {
+		if !color {
+			return text
+		}
+		return code + text + "\x1b[0m"
+	}
+
+	fmt.Fprintf(out, "%s\r\n", headline("\x1b[1;36m", "Select a model"))
+	fmt.Fprintf(out, "%s\r\n\r\n", headline("\x1b[2m", "↑/↓ move  ·  Enter select  ·  q cancel"))
+	lines += 3
+
+	provider := ""
+	for i, option := range options {
+		if option.provider != provider {
+			provider = option.provider
+			label := option.providerLabel
+			if label == "" {
+				label = option.provider
+			}
+			fmt.Fprintf(out, "  %s\r\n", headline("\x1b[1;34m", truncateRunes(label, width-2)))
+			lines++
+		}
+		fmt.Fprintf(out, "%s\r\n", modelPickerRow(option, i == selected, color, width))
+		lines++
+	}
+	return lines
+}
+
+func pickerWidth(out io.Writer) int {
+	if f, ok := out.(*os.File); ok {
+		if width, _, err := term.GetSize(int(f.Fd())); err == nil && width >= 40 {
+			return width
+		}
+	}
+	return 80
+}
+
+func modelPickerRow(option pickerOption, selected, color bool, width int) string {
+	const refColumn = 46
+	if width < 40 {
+		width = 40
+	}
+	prefixPlain := "    "
+	prefix := prefixPlain
+	if selected {
+		prefixPlain = "  › "
+		prefix = "  \x1b[1;36m›\x1b[0m "
+		if !color {
+			prefix = prefixPlain
+		}
+	}
+	bodyWidth := width - utf8.RuneCountInString(prefixPlain)
+	refWidth := refColumn
+	if bodyWidth < refWidth {
+		refWidth = bodyWidth
+	}
+	ref := truncateRunes(option.ref, refWidth)
+	if color {
+		if selected {
+			ref = "\x1b[1;36m" + ref + "\x1b[0m"
+		} else {
+			ref = "\x1b[1;37m" + ref + "\x1b[0m"
+		}
+	}
+	if padding := refWidth - utf8.RuneCountInString(option.ref); padding > 0 {
+		ref += strings.Repeat(" ", padding)
+	}
+	detailWidth := bodyWidth - refWidth - 1
+	if detailWidth <= 0 {
+		return prefix + ref
+	}
+	detail := truncateRunes(option.label, detailWidth)
+	if detail != "" && color {
+		if selected {
+			detail = "\x1b[36m" + detail + "\x1b[0m"
+		} else {
+			detail = "\x1b[2m" + detail + "\x1b[0m"
+		}
+	}
+	if detail == "" {
+		return prefix + strings.TrimRight(ref, " ")
+	}
+	return prefix + ref + " " + detail
+}
+
+func truncateRunes(text string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= width {
+		return text
+	}
+	if width <= 3 {
+		return string(runes[:width])
+	}
+	return string(runes[:width-3]) + "..."
+}
+
+func clearModelPicker(out io.Writer, lines int) {
+	if lines > 0 {
+		fmt.Fprintf(out, "\x1b[%dA", lines)
+	}
+	fmt.Fprint(out, "\r\x1b[J")
+}
+
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
+}
+
+func colorEnabled() bool {
+	if _, ok := os.LookupEnv("NO_COLOR"); ok {
+		return false
+	}
+	if os.Getenv("TERM") == "dumb" || os.Getenv("CLICOLOR") == "0" {
+		return false
+	}
+	return true
+}
+
 func finish(err error) int {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -413,10 +712,10 @@ func usage(w io.Writer) {
 	fmt.Fprintf(w, "graft %s runs Codex or Claude Code against a non-OpenAI provider.\n", version.String())
 	fmt.Fprint(w, `
 Usage:
-  graft codex -m grok-4.7 [codex args...]
-  graft codex -m deepseek-flash [codex args...]
-  graft claude -m grok-4.7 [claude args...]
-  graft claude -m deepseek-flash [claude args...]
+  graft codex [codex args...]
+  graft codex -m provider/model [codex args...]
+  graft claude [claude args...]
+  graft claude -m provider/model [claude args...]
   graft version
   graft init
   graft sync [-q]
@@ -427,7 +726,8 @@ Usage:
   graft key set <slot> [value]
   graft key list
 
---config <file> selects the config. -m, --provider and --config before the
-client arguments are graft's; everything after them is passed to codex or claude.
+Without -m, an interactive terminal prompts for a model. -m, --provider and
+--config before the client arguments are graft's; everything after them is
+passed to codex or claude.
 `)
 }

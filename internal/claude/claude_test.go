@@ -79,6 +79,28 @@ func TestEnvPinsEveryAlias(t *testing.T) {
 	}
 }
 
+func TestVolcengineCodingUsesItsNativeMessagesEndpoint(t *testing.T) {
+	cfg, err := config.Parse("default", []byte(config.DefaultConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := cfg.Providers["volcengine-coding"]
+	if p == nil {
+		t.Fatal("volcengine-coding provider is missing")
+	}
+	base, err := BaseURL(p)
+	if err != nil || base != "https://ark.cn-beijing.volces.com/api/coding" {
+		t.Fatalf("base %q: %v", base, err)
+	}
+	env := Env(p, "deepseek-v4.1-flash", base, "test-key")
+	if env["ANTHROPIC_MODEL"] != "deepseek-v4.1-flash[1m]" || env["ANTHROPIC_AUTH_TOKEN"] != "test-key" {
+		t.Fatalf("model/auth = %q / %q", env["ANTHROPIC_MODEL"], env["ANTHROPIC_AUTH_TOKEN"])
+	}
+	if env["CLAUDE_CODE_EFFORT_LEVEL"] != "max" {
+		t.Fatalf("effort = %q", env["CLAUDE_CODE_EFFORT_LEVEL"])
+	}
+}
+
 func TestWriteSettingsDoesNotTouchClaudeHome(t *testing.T) {
 	dir := t.TempDir()
 	path, err := WriteSettings(dir, "deepseek", map[string]string{"ANTHROPIC_AUTH_TOKEN": "sk-test"})

@@ -41,6 +41,41 @@ func TestDefaultConfigCarriesModelFacts(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigIncludesVolcengineCoding(t *testing.T) {
+	cfg, err := Parse("default", []byte(DefaultConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := cfg.Providers["volcengine-coding"]
+	if p == nil {
+		t.Fatal("volcengine-coding provider is missing")
+	}
+	if p.Label != "Volcengine Coding" || p.Transport != "direct" {
+		t.Fatalf("provider = %+v", p)
+	}
+	if p.Upstream != "https://ark.cn-beijing.volces.com/api/coding/v3" {
+		t.Fatalf("upstream = %q", p.Upstream)
+	}
+	if p.AnthropicBase != "https://ark.cn-beijing.volces.com/api/coding" {
+		t.Fatalf("anthropic base = %q", p.AnthropicBase)
+	}
+	if p.KeyEnv != "ARK_API_KEY" || p.SecretsKey != "volcengine-coding" {
+		t.Fatalf("credential config = env %q slot %q", p.KeyEnv, p.SecretsKey)
+	}
+	if p.ContextWindow != 1048576 {
+		t.Fatalf("context window = %d", p.ContextWindow)
+	}
+	if strings.Join(p.Slugs(), ",") != "deepseek-v4.1-flash,deepseek-v4.1-flash-economy" {
+		t.Fatalf("models = %v", p.Slugs())
+	}
+	for _, slug := range p.Slugs() {
+		model := p.FindModel(slug)
+		if strings.Join(model.Input, ",") != "text,image" || strings.Join(model.Reasoning, ",") != "low,high,max" {
+			t.Fatalf("%s = %+v", slug, model)
+		}
+	}
+}
+
 func TestBareModelListStaysTextOnly(t *testing.T) {
 	cfg, err := Parse("bare", []byte(`
 [providers.kimi]
@@ -55,5 +90,45 @@ models = ["kimi-k2", "kimi-k3"]
 	}
 	if len(p.FindModel("kimi-k2").Input) != 0 || len(p.FindModel("kimi-k2").Reasoning) != 0 {
 		t.Fatalf("bare model = %+v", p.FindModel("kimi-k2"))
+	}
+}
+
+func TestResolveModelUsesProviderNamespace(t *testing.T) {
+	cfg, err := Parse("default", []byte(DefaultConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, slug, err := cfg.ResolveModel("volcengine-coding/deepseek-v4.1-flash", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "volcengine-coding" || slug != "deepseek-v4.1-flash" {
+		t.Fatalf("resolved %s/%s", p.Name, slug)
+	}
+	if _, _, err := cfg.ResolveModel("deepseek/deepseek-v4.1-flash", ""); err == nil {
+		t.Fatal("namespace selected the wrong provider")
+	}
+}
+
+func TestResolveModelRejectsAmbiguousBareSlug(t *testing.T) {
+	cfg, err := Parse("ambiguous", []byte(`
+[providers.alpha]
+models = ["shared"]
+
+[providers.beta]
+models = ["shared"]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := cfg.ResolveModel("shared", ""); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("ambiguous error = %v", err)
+	}
+	p, slug, err := cfg.ResolveModel("shared", "beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "beta" || slug != "shared" {
+		t.Fatalf("provider-scoped model = %s/%s", p.Name, slug)
 	}
 }

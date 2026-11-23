@@ -123,6 +123,34 @@ func TestDefaultConfigBuildsTheCatalog(t *testing.T) {
 	}
 }
 
+func TestVolcengineCodingCatalogCarriesItsCapabilities(t *testing.T) {
+	cfg, err := config.Parse("default", []byte(config.DefaultConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := cfg.Providers["volcengine-coding"]
+	if p == nil {
+		t.Fatal("volcengine-coding provider is missing")
+	}
+	entry := Entry(p, "deepseek-v4.1-flash")
+	if entry["display_name"] != "DeepSeek V4.1 Flash" {
+		t.Fatalf("display_name = %v", entry["display_name"])
+	}
+	if entry["context_window"] != 1048576 || entry["max_context_window"] != 1048576 {
+		t.Fatalf("context = %v / %v", entry["context_window"], entry["max_context_window"])
+	}
+	if got := strings.Join(stringsOf(entry["input_modalities"].([]any)), ","); got != "text,image" {
+		t.Fatalf("input = %s", got)
+	}
+	if got := strings.Join(effortNames(entry["supported_reasoning_levels"].([]any)), ","); got != "low,high,max" {
+		t.Fatalf("efforts = %s", got)
+	}
+	if entry["apply_patch_tool_type"] != "freeform" || entry["shell_type"] != "shell_command" || entry["supports_search_tool"] != true || entry["multi_agent_version"] != "v2" {
+		t.Fatalf("catalog flags = apply %v shell %v search %v multi %v",
+			entry["apply_patch_tool_type"], entry["shell_type"], entry["supports_search_tool"], entry["multi_agent_version"])
+	}
+}
+
 func TestInstructionsAreEmbedded(t *testing.T) {
 	entry := Entry(&config.Provider{Name: "grok", Label: "Grok"}, "grok-4.7")
 	text := entry["model_messages"].(map[string]any)["instructions_template"].(string)

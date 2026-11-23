@@ -80,6 +80,36 @@ id = "deepseek-v4-pro"
 display_name = "DeepSeek V4 Pro"
 input = ["text"]
 reasoning = ["low", "high", "max"]
+
+[providers.volcengine-coding]
+label = "Volcengine Coding"
+transport = "direct"
+upstream = "https://ark.cn-beijing.volces.com/api/coding/v3"
+anthropic_base = "https://ark.cn-beijing.volces.com/api/coding"
+auth = "api-key"
+# graft reads $ARK_API_KEY, else ~/.config/graft/secrets.toml [keys].volcengine-coding
+key_env = "ARK_API_KEY"
+secrets_key = "volcengine-coding"
+context_window = 1048576
+disable_agent_tools = false
+disable_web_search = false
+shell_type = "shell_command"
+apply_patch_tool_type = "freeform"
+supports_search_tool = true
+multi_agent_version = "v2"
+supports_reasoning_summaries = true
+
+[[providers.volcengine-coding.models]]
+id = "deepseek-v4.1-flash"
+display_name = "DeepSeek V4.1 Flash"
+input = ["text", "image"]
+reasoning = ["low", "high", "max"]
+
+[[providers.volcengine-coding.models]]
+id = "deepseek-v4.1-flash-economy"
+display_name = "DeepSeek V4.1 Flash Economy"
+input = ["text", "image"]
+reasoning = ["low", "high", "max"]
 `
 
 // Model is one catalog entry. Input and reasoning come from config; a bare
@@ -167,23 +197,58 @@ func (c *Config) ProviderNamed(name string) (*Provider, error) {
 	return p, nil
 }
 
-// ResolveModel picks a provider from a model slug, or a provider's default model.
-// A "name:model" prefix is stripped so `grok:grok-4.7` still matches.
+// ResolveModel picks a provider from a model reference, or a provider's default
+// model. References use "provider/model"; the older "provider:model" form is
+// accepted when the prefix names a configured provider.
 func (c *Config) ResolveModel(model, provider string) (*Provider, string, error) {
 	if model != "" {
-		normalized := model
-		if i := strings.LastIndex(model, ":"); i >= 0 {
-			normalized = model[i+1:]
+		modelProvider, slug := c.splitModelRef(model)
+		if modelProvider != "" {
+			if provider != "" && provider != modelProvider {
+				return nil, "", fmt.Errorf("model namespace %q conflicts with --provider %q", modelProvider, provider)
+			}
+			provider = modelProvider
 		}
+		if slug == "" {
+			return nil, "", fmt.Errorf("model reference %q has no model name", model)
+		}
+		if provider != "" {
+			p, err := c.ProviderNamed(provider)
+			if err != nil {
+				return nil, "", err
+			}
+			for _, known := range p.Slugs() {
+				if known == slug {
+					return p, slug, nil
+				}
+			}
+			return nil, "", fmt.Errorf("unknown model %q for provider %q (known: %s)",
+				slug, provider, strings.Join(p.Slugs(), ", "))
+		}
+		var matches []*Provider
 		var known []string
 		for _, name := range c.Order {
 			p := c.Providers[name]
-			known = append(known, p.Slugs()...)
 			for _, slug := range p.Slugs() {
-				if slug == normalized {
-					return p, normalized, nil
+				known = append(known, name+"/"+slug)
+				if slug == model {
+					matches = append(matches, p)
 				}
 			}
+		}
+		if len(matches) == 1 {
+			for _, slug := range matches[0].Slugs() {
+				if slug == model {
+					return matches[0], slug, nil
+				}
+			}
+		}
+		if len(matches) > 1 {
+			options := make([]string, 0, len(matches))
+			for _, p := range matches {
+				options = append(options, p.Name+"/"+model)
+			}
+			return nil, "", fmt.Errorf("model %q is ambiguous; use one of: %s", model, strings.Join(options, ", "))
 		}
 		return nil, "", fmt.Errorf("unknown model %q (known: %s)", model, strings.Join(known, ", "))
 	}
@@ -199,6 +264,18 @@ func (c *Config) ResolveModel(model, provider string) (*Provider, string, error)
 		return p, slug, nil
 	}
 	return nil, "", fmt.Errorf("no model given: pass -m <model> or --provider <name>")
+}
+
+func (c *Config) splitModelRef(model string) (provider, slug string) {
+	if i := strings.Index(model, "/"); i > 0 {
+		return model[:i], model[i+1:]
+	}
+	if i := strings.LastIndex(model, ":"); i > 0 {
+		if _, ok := c.Providers[model[:i]]; ok {
+			return model[:i], model[i+1:]
+		}
+	}
+	return "", model
 }
 
 // Home is the directory holding config.toml and secrets.toml.
