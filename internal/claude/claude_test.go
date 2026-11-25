@@ -103,7 +103,7 @@ func TestVolcengineCodingUsesItsNativeMessagesEndpoint(t *testing.T) {
 
 func TestWriteSettingsDoesNotTouchClaudeHome(t *testing.T) {
 	dir := t.TempDir()
-	path, err := WriteSettings(dir, "deepseek", map[string]string{"ANTHROPIC_AUTH_TOKEN": "sk-test"})
+	path, err := WriteSettings(dir, "deepseek", map[string]any{"env": map[string]string{"ANTHROPIC_AUTH_TOKEN": "sk-test"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,5 +126,41 @@ func TestWriteSettingsDoesNotTouchClaudeHome(t *testing.T) {
 	}
 	if decoded.Env["ANTHROPIC_AUTH_TOKEN"] != "sk-test" {
 		t.Fatalf("settings = %#v", decoded.Env)
+	}
+}
+
+func TestSessionSettingsListsSameProviderModels(t *testing.T) {
+	cfg, err := config.Parse("default", []byte(config.DefaultConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	grok := cfg.Providers["grok"]
+	env := Env(grok, "grok-4.7", "http://127.0.0.1:8887", "")
+	doc := SessionSettings(grok, env)
+	if doc["model"] != "grok-4.7" {
+		t.Fatalf("model = %#v", doc["model"])
+	}
+	ids, _ := doc["availableModels"].([]string)
+	if strings.Join(ids, ",") != "grok-4.7,grok-4.7-build-fast,grok-4.6" {
+		t.Fatalf("availableModels = %v", ids)
+	}
+	picker, _ := doc["modelPicker"].(map[string]any)
+	if picker["replaceBuiltInOptions"] != true {
+		t.Fatalf("replaceBuiltInOptions = %#v", picker["replaceBuiltInOptions"])
+	}
+	rows, _ := picker["options"].([]map[string]string)
+	if len(rows) != 3 || rows[0]["model"] != "grok-4.7" || rows[0]["label"] != "Grok 4.7" {
+		t.Fatalf("options = %#v", rows)
+	}
+	if rows[1]["model"] != "grok-4.7-build-fast" || rows[1]["label"] != "Grok 4.7 Fast" {
+		t.Fatalf("fast row = %#v", rows[1])
+	}
+
+	deepseek := cfg.Providers["deepseek"]
+	denv := Env(deepseek, "deepseek-flash", "https://api.deepseek.com/anthropic", "sk")
+	ddoc := SessionSettings(deepseek, denv)
+	dids, _ := ddoc["availableModels"].([]string)
+	if strings.Join(dids, ",") != "deepseek-flash[1m],deepseek-v4-pro[1m]" {
+		t.Fatalf("deepseek availableModels = %v", dids)
 	}
 }

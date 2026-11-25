@@ -40,19 +40,17 @@ func BaseURL(p *config.Provider) (string, error) {
 }
 
 // Env is the Claude Code environment for one model.
-// Opus, Sonnet, Haiku, and Fable all pin to that model so a picker row cannot
-// fall through to a provider's claude-* alias. A 1M window gets the [1m]
-// suffix Claude Code strips before the request. A smaller window sets
-// CLAUDE_CODE_MAX_CONTEXT_TOKENS and CLAUDE_CODE_DISABLE_1M_CONTEXT.
-// Without the disable flag, Claude Code still labels an unrecognized model
-// as a 1M opt-in (the default row shows "<id>[1m]") even when the meter
-// follows MAX_CONTEXT_TOKENS.
+// Opus, Sonnet, Haiku, Fable, and the subagent alias still pin to that model
+// so a leftover family row cannot fall through to a provider's claude-*
+// mapping. The /model list itself is replaced by SessionSettings. A 1M
+// window gets the [1m] suffix Claude Code strips before the request. A
+// smaller window sets CLAUDE_CODE_MAX_CONTEXT_TOKENS and
+// CLAUDE_CODE_DISABLE_1M_CONTEXT. Without the disable flag, Claude Code
+// still labels an unrecognized model as a 1M opt-in (the default row shows
+// "<id>[1m]") even when the meter follows MAX_CONTEXT_TOKENS.
 func Env(p *config.Provider, slug, baseURL, token string) map[string]string {
 	model := p.FindModel(slug)
-	pinned := slug
-	if p.ContextWindow >= 1_000_000 {
-		pinned = slug + "[1m]"
-	}
+	pinned := pinnedSlug(p, slug)
 	name := model.DisplayName
 	if name == "" {
 		name = slug
@@ -136,13 +134,63 @@ func capabilities(levels []string) string {
 	return strings.Join(caps, ",")
 }
 
+func pinnedSlug(p *config.Provider, slug string) string {
+	if p.ContextWindow >= 1_000_000 {
+		return slug + "[1m]"
+	}
+	return slug
+}
+
+// SessionSettings is the one-session Claude Code settings document.
+// modelPicker.replaceBuiltInOptions hides Opus/Sonnet/Haiku/Fable so /model
+// lists this provider's models. availableModels keeps a leftover family
+// alias from leaving the provider. Aliases in env remain pinned to the
+// model this session started on.
+func SessionSettings(p *config.Provider, env map[string]string) map[string]any {
+	doc := map[string]any{"env": env}
+	if model := env["ANTHROPIC_MODEL"]; model != "" {
+		doc["model"] = model
+	}
+	options := pickerOptions(p)
+	if len(options) == 0 {
+		return doc
+	}
+	ids := make([]string, 0, len(options))
+	for _, row := range options {
+		ids = append(ids, row["model"])
+	}
+	doc["availableModels"] = ids
+	doc["modelPicker"] = map[string]any{
+		"replaceBuiltInOptions": true,
+		"options":               options,
+	}
+	return doc
+}
+
+func pickerOptions(p *config.Provider) []map[string]string {
+	slugs := p.Slugs()
+	out := make([]map[string]string, 0, len(slugs))
+	for _, slug := range slugs {
+		model := p.FindModel(slug)
+		label := model.DisplayName
+		if label == "" {
+			label = slug
+		}
+		out = append(out, map[string]string{
+			"model": pinnedSlug(p, slug),
+			"label": label,
+		})
+	}
+	return out
+}
+
 // WriteSettings writes the one-session settings file. It contains the
 // credential, so the file is mode 600. ~/.claude/settings.json is not touched.
-func WriteSettings(dir, provider string, env map[string]string) (string, error) {
+func WriteSettings(dir, provider string, doc map[string]any) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	payload, err := json.MarshalIndent(map[string]any{"env": env}, "", "  ")
+	payload, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return "", err
 	}
@@ -184,7 +232,7 @@ func Launch(cfg *config.Config, p *config.Provider, model string, args []string)
 		return err
 	}
 	env := Env(p, model, base, token)
-	settings, err := WriteSettings(filepath.Join(config.Home(), "claude"), p.Name, env)
+	settings, err := WriteSettings(filepath.Join(config.Home(), "claude"), p.Name, SessionSettings(p, env))
 	if err != nil {
 		return err
 	}

@@ -40,7 +40,7 @@ func TestModelsCommandPrintsNamespaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := captureStdout(t, func() int { return Main([]string{"--config", path, "models"}) })
-	if !strings.Contains(out, "volcengine-coding/deepseek-v4.1-flash") {
+	if !strings.Contains(out, "volcengine-coding/deepseek-v4.1-flash") || !strings.Contains(out, "grok/grok-4.7-build-fast") {
 		t.Fatalf("models = %q", out)
 	}
 }
@@ -100,7 +100,7 @@ func TestChooseModelReturnsProviderNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	ref, err := chooseModel(cfg, "", bytes.NewBufferString("5\n"), &out)
+	ref, err := chooseModel(cfg, "", bytes.NewBufferString("6\n"), &out)
 	if err != nil {
 		t.Fatal(err)
 	}

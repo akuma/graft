@@ -11,12 +11,16 @@ func TestDefaultConfigCarriesModelFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	grok := cfg.Providers["grok"]
-	if strings.Join(grok.Slugs(), ",") != "grok-4.7,grok-4.6" {
+	if strings.Join(grok.Slugs(), ",") != "grok-4.7,grok-4.7-build-fast,grok-4.6" {
 		t.Fatalf("grok models = %v", grok.Slugs())
 	}
 	flash := grok.FindModel("grok-4.7")
 	if flash.DisplayName != "Grok 4.7" || strings.Join(flash.Input, ",") != "text,image" || strings.Join(flash.Reasoning, ",") != "low,medium,high,xhigh" {
 		t.Fatalf("grok-4.7 = %+v", flash)
+	}
+	fast := grok.FindModel("grok-4.7-build-fast")
+	if fast.DisplayName != "Grok 4.7 Fast" || strings.Join(fast.Input, ",") != "text,image" || strings.Join(fast.Reasoning, ",") != "low,medium,high,xhigh" {
+		t.Fatalf("grok-4.7-build-fast = %+v", fast)
 	}
 	deepseek := cfg.Providers["deepseek"]
 	pro := deepseek.FindModel("deepseek-v4-pro")
